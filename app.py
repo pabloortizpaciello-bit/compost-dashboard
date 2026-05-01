@@ -369,29 +369,45 @@ with tab1:
                         hovertemplate="<b>⚠ spike</b>: %{y:.2f}%<extra></extra>",
                     ), row=main_row, col=1)
 
-        # ── Fan band ──────────────────────────────────────────────────────────
+       # ── Fan shading as vrect on every subplot ─────────────────────────────
         if show_band:
             fan_mask = get_fan_on_mask(df, fan_col)
-            fig.add_trace(go.Scatter(
-                x=df[TIMESTAMP_COL],
-                y=fan_mask.astype(float),
-                fill="tozeroy",
-                fillcolor="rgba(63,185,80,0.3)",
-                line=dict(color="rgba(63,185,80,0.7)", width=1),
-                name="Fan ON",
-                customdata=["ON" if v else "OFF" for v in fan_mask],
-                hovertemplate="<b>Fan</b>: %{customdata}<extra></extra>",
-            ), row=band_row, col=1)
+            times = df[TIMESTAMP_COL].values
+            in_block = False
+            block_start = None
 
-            fig.update_yaxes(
-                row=band_row, col=1,
-                tickvals=[0, 1], ticktext=["OFF", "ON"],
-                range=[-0.05, 1.35],
-                tickfont=dict(size=9, color="#8b949e"),
-                gridcolor="#21262d", linecolor="#30363d",
-                title_text="Fan",
-                title_font=dict(size=9, color="#8b949e"),
-            )
+            # Find contiguous ON blocks and draw a vrect on every sensor row
+            for ts, is_on in zip(times, fan_mask):
+                if is_on and not in_block:
+                    block_start = ts
+                    in_block = True
+                elif not is_on and in_block:
+                    for row in range(1, n_sensor_rows + 1):
+                        fig.add_vrect(
+                            x0=block_start, x1=ts,
+                            fillcolor="rgba(63,185,80,0.12)",
+                            layer="below", line_width=0,
+                            row=row, col=1,
+                        )
+                    in_block = False
+            # Close last open block
+            if in_block:
+                for row in range(1, n_sensor_rows + 1):
+                    fig.add_vrect(
+                        x0=block_start, x1=times[-1],
+                        fillcolor="rgba(63,185,80,0.12)",
+                        layer="below", line_width=0,
+                        row=row, col=1,
+                    )
+
+            # Add one invisible trace just for the legend entry
+            fig.add_trace(go.Scatter(
+                x=[None], y=[None],
+                mode="markers",
+                marker=dict(size=10, color="rgba(63,185,80,0.5)", symbol="square"),
+                name="Fan ON",
+                showlegend=True,
+            ), row=1, col=1)
 
         # ── Shared layout ─────────────────────────────────────────────────────
         fig.update_layout(height=520 if show_band else 460, **base)
