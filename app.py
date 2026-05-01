@@ -70,17 +70,28 @@ def load_csv(file):
         encoding_errors="ignore",
     )
     df.columns = df.columns.str.strip()
+
     if TIMESTAMP_COL in df.columns:
         df[TIMESTAMP_COL] = pd.to_datetime(df[TIMESTAMP_COL], errors="coerce")
         df = df.dropna(subset=[TIMESTAMP_COL])
         df = df.sort_values(TIMESTAMP_COL).reset_index(drop=True)
+
     for col in NUMERIC_COLS:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
+
     return df
 
 
 def detect_fan_col(df):
+    """
+    Detect the best column to use for fan ON/OFF shading.
+
+    Preference order:
+    1. FanState, if your Arduino logs ON/OFF text.
+    2. Hz, if your Arduino logs fan speed/frequency.
+    3. Step, if your Arduino logs control step.
+    """
     for c in ["FanState", "Hz", "Step"]:
         if c in df.columns:
             return c
@@ -88,11 +99,68 @@ def detect_fan_col(df):
 
 
 def get_fan_on_mask(df, fan_col):
-    if fan_col == "FanState":
-        return df[fan_col].fillna("OFF").str.upper() == "ON"
-    elif fan_col in ("Hz", "Step"):
-        return df[fan_col].fillna(0) > 0
-    return pd.Series(False, index=df.index)
+    """
+    Return True when the fan is ON and False when the fan is OFF.
+
+    This version is more robust than the original because it can handle:
+    - FanState values: ON, OFF, RUNNING, TRUE, FALSE
+    - Hz values: 15, 20, 0
+    - Step values: 1, 2, 0
+    - Boolean-style values: 1/0, yes/no, high/low
+    """
+    if fan_col is None or fan_col not in df.columns:
+        return pd.Series(False, index=df.index)
+
+    values = df[fan_col]
+
+    # Try numeric interpretation first: useful for Hz, Step, 1/0, etc.
+    numeric = pd.to_numeric(values, errors="coerce")
+    if numeric.notna().sum() > 0:
+        return numeric.fillna(0) > 0
+
+    # If values are not numeric, interpret text.
+    text = values.astype(str).str.strip().str.upper()
+    return text.isin(["ON", "RUN", "RUNNING", "TRUE", "1", "YES", "HIGH"])
+
+
+def get_fan_blocks(df, fan_col):
+    """
+    Convert fan ON/OFF readings into continuous ON time blocks.
+
+    Returns a list like:
+    [(start_time_1, end_time_1), (start_time_2, end_time_2)]
+    """
+    if df.empty or fan_col is None or fan_col not in df.columns or TIMESTAMP_COL not in df.columns:
+        return []
+
+    temp = df[[TIMESTAMP_COL, fan_col]].copy()
+    temp[TIMESTAMP_COL] = pd.to_datetime(temp[TIMESTAMP_COL], errors="coerce")
+    temp = temp.dropna(subset=[TIMESTAMP_COL])
+    temp = temp.sort_values(TIMESTAMP_COL).reset_index(drop=True)
+
+    if temp.empty:
+        return []
+
+    fan_mask = get_fan_on_mask(temp, fan_col).fillna(False).astype(bool)
+    times = temp[TIMESTAMP_COL].tolist()
+
+    blocks = []
+    in_block = False
+    block_start = None
+
+    for ts, is_on in zip(times, fan_mask):
+        if is_on and not in_block:
+            block_start = ts
+            in_block = True
+        elif not is_on and in_block:
+            blocks.append((block_start, ts))
+            in_block = False
+
+    # If the file ends while the fan is still ON, close the block at the final timestamp.
+    if in_block:
+        blocks.append((block_start, times[-1]))
+
+    return blocks
 
 
 def apply_rolling(series, window):
@@ -103,50 +171,58 @@ def apply_rolling(series, window):
 
 def flag_anomalies(series, threshold=3.0):
     roll_mean = series.rolling(30, min_periods=5, center=True).mean()
-    roll_std  = series.rolling(30, min_periods=5, center=True).std()
+    roll_std = series.rolling(30, min_periods=5, center=True).std()
     z = (series - roll_mean) / (roll_std + 1e-9)
     return z.abs() > threshold
 
 
-def add_fan_vrects(fig, df, fan_col, n_rows):
-    """Draw fan-ON shaded bands across all subplot rows using add_shape."""
-    fan_mask = get_fan_on_mask(df, fan_col)
-    times = df[TIMESTAMP_COL].tolist()
-    in_block = False
-    block_start = None
+def add_fan_vrects(fig, df, fan_col):
+    """
+    Draw fan-ON shaded bands across all subplot rows.
 
-    blocks = []
-    for ts, is_on in zip(times, fan_mask):
-        if is_on and not in_block:
-            block_start = ts
-            in_block = True
-        elif not is_on and in_block:
-            blocks.append((block_start, ts))
-            in_block = False
-    if in_block:
-        blocks.append((block_start, times[-1]))
+    This replaces the old xref/yref add_shape approach. The old approach can shade
+    too much of the plot when subplot axis names do not match exactly. Plotly's
+    add_vrect with row='all' is much more reliable for shared-x subplots.
+    """
+    blocks = get_fan_blocks(df, fan_col)
 
-    # add_shape with xref/yref works reliably across shared-x subplots
-    for r in range(1, n_rows + 1):
-        xref = "x" if r == 1 else f"x{r}"
-        yref = "y domain" if r == 1 else f"y{r} domain"
-        for t0, t1 in blocks:
-            fig.add_shape(
-                type="rect",
-                xref=xref, yref=yref,
-                x0=t0, x1=t1,
-                y0=0, y1=1,
-                fillcolor="rgba(88,166,255,0.12)",
-                line_width=0,
-                layer="below",
-            )
+    for t0, t1 in blocks:
+        # Skip zero-width blocks.
+        if pd.isna(t0) or pd.isna(t1) or t0 == t1:
+            continue
 
-    # Legend entry (added as a separate trace that won't interfere)
-    fig.add_trace(go.Scatter(
-        x=[None], y=[None], mode="markers",
-        marker=dict(size=10, color="rgba(88,166,255,0.35)", symbol="square"),
-        name="Fan ON", showlegend=True,
-    ), row=n_rows, col=1)
+        fig.add_vrect(
+            x0=t0,
+            x1=t1,
+            fillcolor="rgba(88,166,255,0.12)",
+            opacity=1,
+            line_width=0,
+            layer="below",
+            row="all",
+            col=1,
+        )
+
+    return fig
+
+
+def add_fan_legend_trace(fig, n_rows):
+    """
+    Add a fake trace so Fan ON appears in the legend.
+    """
+    fig.add_trace(
+        go.Scatter(
+            x=[None],
+            y=[None],
+            mode="markers",
+            marker=dict(size=10, color="rgba(88,166,255,0.35)", symbol="square"),
+            name="Fan ON",
+            showlegend=True,
+        ),
+        row=n_rows,
+        col=1,
+    )
+    return fig
+
 
 def plotly_base():
     return dict(
@@ -159,8 +235,11 @@ def plotly_base():
         ),
         margin=dict(l=60, r=20, t=30, b=40),
         hovermode="x unified",
-        hoverlabel=dict(bgcolor="#161b22", bordercolor="#30363d",
-                        font=dict(color="#cdd9e5", size=11)),
+        hoverlabel=dict(
+            bgcolor="#161b22",
+            bordercolor="#30363d",
+            font=dict(color="#cdd9e5", size=11),
+        ),
     )
 
 
@@ -171,6 +250,11 @@ with st.sidebar:
 
     if uploaded:
         df_raw = load_csv(uploaded)
+
+        if TIMESTAMP_COL not in df_raw.columns or df_raw.empty:
+            st.error(f"The file must contain a valid '{TIMESTAMP_COL}' column.")
+            st.stop()
+
         fan_col = detect_fan_col(df_raw)
         present_numeric = [c for c in NUMERIC_COLS if c in df_raw.columns]
 
@@ -180,8 +264,12 @@ with st.sidebar:
         t_max = df_raw[TIMESTAMP_COL].max()
         total_hours = max((t_max - t_min).total_seconds() / 3600, 1)
 
-        range_mode = st.radio("Range mode", ["Last N hours", "Last N days", "Full range"],
-                              label_visibility="collapsed")
+        range_mode = st.radio(
+            "Range mode",
+            ["Last N hours", "Last N days", "Full range"],
+            label_visibility="collapsed",
+        )
+
         if range_mode == "Last N hours":
             n_h = st.slider("Hours", 1, min(int(total_hours), 720), min(24, int(total_hours)))
             t_start = t_max - timedelta(hours=n_h)
@@ -200,7 +288,7 @@ with st.sidebar:
             c for c in present_numeric
             if st.checkbox(
                 f"{NUMERIC_COLS[c]['label']} ({NUMERIC_COLS[c]['unit']})"
-                if NUMERIC_COLS[c]['unit'] else NUMERIC_COLS[c]['label'],
+                if NUMERIC_COLS[c]["unit"] else NUMERIC_COLS[c]["label"],
                 value=(c in DEFAULT_ON),
                 key=c,
             )
@@ -211,7 +299,7 @@ with st.sidebar:
         rolling_window = st.slider(
             "Window (rows) — 1 = raw",
             1, 120, 1,
-            help="1 = raw data. Higher = smoother. At 10s intervals: window 6 ≈ 1 min average."
+            help="1 = raw data. Higher = smoother. At 10s intervals: window 6 ≈ 1 min average.",
         )
         show_raw_under = False
         if rolling_window > 1:
@@ -220,7 +308,37 @@ with st.sidebar:
         st.markdown("---")
         st.markdown("**⚙️ Options**")
         show_anomalies = st.checkbox("Flag O₂ anomalies", value=True)
-        show_fan_band  = st.checkbox("Show fan ON/OFF bands", value=True)
+        show_fan_band = st.checkbox("Show fan ON bands", value=True)
+
+        # Give the user a way to override which column controls fan shading.
+        if show_fan_band:
+            candidate_fan_cols = [c for c in ["FanState", "Hz", "Step"] if c in df.columns]
+            if candidate_fan_cols:
+                default_index = candidate_fan_cols.index(fan_col) if fan_col in candidate_fan_cols else 0
+                fan_col = st.selectbox(
+                    "Fan shading column",
+                    candidate_fan_cols,
+                    index=default_index,
+                    help="Use FanState if available. Otherwise use Hz if fan ON means Hz > 0.",
+                )
+
+                fan_mask_debug = get_fan_on_mask(df, fan_col)
+                fan_counts = fan_mask_debug.value_counts(dropna=False)
+                fan_blocks = get_fan_blocks(df, fan_col)
+
+                st.caption("Fan detection check")
+                st.write(fan_counts)
+                st.caption(f"Fan ON blocks detected: {len(fan_blocks)}")
+
+                if len(fan_blocks) == 1 and fan_mask_debug.all():
+                    st.warning(
+                        "The selected fan column is being interpreted as always ON, "
+                        "so the whole plot will be shaded. Try selecting FanState instead of Hz/Step, "
+                        "or check whether the column contains any OFF/0 values in this time range."
+                    )
+            else:
+                fan_col = None
+                st.warning("No fan column found. Expected one of: FanState, Hz, Step.")
 
     else:
         df = None
@@ -228,8 +346,10 @@ with st.sidebar:
         rolling_window = 1
         show_raw_under = False
         show_anomalies = True
-        show_fan_band  = True
+        show_fan_band = True
         fan_col = None
+        t_start = None
+        t_max = None
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown('<div class="dash-header">🌱 Compost Monitor</div>', unsafe_allow_html=True)
@@ -246,10 +366,11 @@ if df is None:
 # ── Metric cards ──────────────────────────────────────────────────────────────
 key_metrics = [
     ("O2_avg_%", "#58a6ff"),
-    ("CO2_ppm",  "#ffa657"),
-    ("Temp_C",   "#ff7b72"),
-    ("RTC_C",    "#ffa198"),
+    ("CO2_ppm", "#ffa657"),
+    ("Temp_C", "#ff7b72"),
+    ("RTC_C", "#ffa198"),
 ]
+
 metrics_html = '<div class="metric-grid">'
 for col, accent in key_metrics:
     if col in df.columns:
@@ -262,20 +383,22 @@ for col, accent in key_metrics:
             f'<div class="metric-value">{val:.1f}<span class="metric-unit">{info["unit"]}</span></div>'
             f'</div>'
         )
-if fan_col:
+
+if fan_col and fan_col in df.columns:
     fan_series = df[fan_col].dropna()
     if not fan_series.empty:
         last_fan = fan_series.iloc[-1]
-        is_on = (str(last_fan).upper() == "ON") if fan_col == "FanState" else (float(last_fan) > 0)
+        is_on = bool(get_fan_on_mask(pd.DataFrame({fan_col: [last_fan]}), fan_col).iloc[0])
         chip_class = "chip-on" if is_on else "chip-off"
         label = "ON" if is_on else "OFF"
-        suffix = f" · {last_fan} Hz" if fan_col == "Hz" else ""
+        suffix = f" · {last_fan} Hz" if fan_col == "Hz" else f" · {last_fan}"
         metrics_html += (
             f'<div class="metric-card" style="--accent:#3fb950">'
             f'<div class="metric-label">Fan</div>'
             f'<div style="margin-top:5px"><span class="{chip_class}">{label}{suffix}</span></div>'
             f'</div>'
         )
+
 metrics_html += (
     f'<div class="metric-card" style="--accent:#484f58">'
     f'<div class="metric-label">Rows</div>'
@@ -311,7 +434,7 @@ with tab1:
 
         subplot_titles = [
             f"{NUMERIC_COLS[c]['label']} ({NUMERIC_COLS[c]['unit']})"
-            if NUMERIC_COLS[c]['unit'] else NUMERIC_COLS[c]['label']
+            if NUMERIC_COLS[c]["unit"] else NUMERIC_COLS[c]["label"]
             for c in selected_cols
         ]
 
@@ -324,56 +447,76 @@ with tab1:
             subplot_titles=subplot_titles,
         )
 
-        # Add fan ON bands as vertical shading across all subplots
+        # Add fan ON bands as vertical shading across all subplots.
+        # Add after make_subplots and before/after traces both works, because row='all' targets subplot grid.
         if show_fan_band and fan_col is not None and len(df) > 1:
-            add_fan_vrects(fig, df, fan_col, n_rows)
+            fig = add_fan_vrects(fig, df, fan_col)
+            fig = add_fan_legend_trace(fig, n_rows)
 
         # Add one trace per variable on its own subplot
         for i, col in enumerate(selected_cols):
             row = i + 1
             info = NUMERIC_COLS[col]
             color = info["color"]
-            y_raw  = df[col]
+            y_raw = df[col]
             y_plot = apply_rolling(y_raw, rolling_window)
 
             # Faint raw underneath when smoothing
             if rolling_window > 1 and show_raw_under:
-                fig.add_trace(go.Scatter(
-                    x=df[TIMESTAMP_COL], y=y_raw,
-                    name=f"{info['label']} raw",
-                    line=dict(color=color, width=0.8),
-                    opacity=0.2,
-                    showlegend=False,
-                    hoverinfo="skip",
-                ), row=row, col=1)
+                fig.add_trace(
+                    go.Scatter(
+                        x=df[TIMESTAMP_COL],
+                        y=y_raw,
+                        name=f"{info['label']} raw",
+                        line=dict(color=color, width=0.8),
+                        opacity=0.2,
+                        showlegend=False,
+                        hoverinfo="skip",
+                    ),
+                    row=row,
+                    col=1,
+                )
 
             # Main line
-            fig.add_trace(go.Scatter(
-                x=df[TIMESTAMP_COL],
-                y=y_plot,
-                name=info["label"],
-                line=dict(color=color, width=1.8),
-                hovertemplate=f"<b>{info['label']}</b>: %{{y:.2f}} {info['unit']}<extra></extra>",
-            ), row=row, col=1)
+            fig.add_trace(
+                go.Scatter(
+                    x=df[TIMESTAMP_COL],
+                    y=y_plot,
+                    name=info["label"],
+                    line=dict(color=color, width=1.8),
+                    hovertemplate=f"<b>{info['label']}</b>: %{{y:.2f}} {info['unit']}<extra></extra>",
+                ),
+                row=row,
+                col=1,
+            )
 
             # Anomaly markers for O2
             if show_anomalies and col in ("O2_raw_%", "O2_avg_%"):
                 mask = flag_anomalies(y_raw)
                 if mask.any():
-                    fig.add_trace(go.Scatter(
-                        x=df.loc[mask, TIMESTAMP_COL],
-                        y=y_raw[mask],
-                        mode="markers",
-                        name="⚠ O₂ spike",
-                        marker=dict(color="#f0883e", size=8, symbol="x-thin",
-                                    line=dict(width=2, color="#f0883e")),
-                        hovertemplate="<b>⚠ spike</b>: %{y:.2f}%<extra></extra>",
-                        showlegend=(i == 0),
-                    ), row=row, col=1)
+                    fig.add_trace(
+                        go.Scatter(
+                            x=df.loc[mask, TIMESTAMP_COL],
+                            y=y_raw[mask],
+                            mode="markers",
+                            name="⚠ O₂ spike",
+                            marker=dict(
+                                color="#f0883e",
+                                size=8,
+                                symbol="x-thin",
+                                line=dict(width=2, color="#f0883e"),
+                            ),
+                            hovertemplate="<b>⚠ spike</b>: %{y:.2f}%<extra></extra>",
+                            showlegend=(i == 0),
+                        ),
+                        row=row,
+                        col=1,
+                    )
 
             # Y-axis styling per subplot
             fig.update_yaxes(
-                row=row, col=1,
+                row=row,
+                col=1,
                 tickfont=dict(size=9, color="#8b949e"),
                 gridcolor="#21262d",
                 linecolor="#30363d",
@@ -413,12 +556,24 @@ with tab2:
         f'{len(df):,} rows · {t_start.strftime("%Y-%m-%d %H:%M")} → {t_max.strftime("%Y-%m-%d %H:%M")}</span>',
         unsafe_allow_html=True,
     )
+
+    if fan_col and fan_col in df.columns:
+        fan_mask = get_fan_on_mask(df, fan_col)
+        fan_blocks = get_fan_blocks(df, fan_col)
+        with st.expander("🌀 Fan detection debug"):
+            st.write("Selected fan column:", fan_col)
+            st.write("ON/OFF counts:")
+            st.write(fan_mask.value_counts(dropna=False))
+            st.write("First 10 fan ON blocks:")
+            st.write(fan_blocks[:10])
+
     with st.expander("📊 Summary Statistics"):
         stat_cols = [c for c in selected_cols if c in df.columns]
         if stat_cols:
             stats = df[stat_cols].describe().T
             stats.index = [NUMERIC_COLS.get(c, {}).get("label", c) for c in stats.index]
             st.dataframe(stats.style.format("{:.3f}"), use_container_width=True)
+
     st.dataframe(df.reset_index(drop=True), use_container_width=True, height=420)
 
 # ── TAB 3: Download ───────────────────────────────────────────────────────────
