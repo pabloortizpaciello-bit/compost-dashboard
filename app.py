@@ -12,88 +12,35 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── Custom CSS ─────────────────────────────────────────────────────────────────
+# ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;500&display=swap');
-
 html, body, [class*="css"] { font-family: 'IBM Plex Sans', sans-serif; }
-
 .stApp { background-color: #0d1117; color: #cdd9e5; }
 .main .block-container { padding-top: 1.5rem; max-width: 1400px; }
-
-.dash-header {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 1.5rem; font-weight: 600;
-    color: #58a6ff; letter-spacing: -0.01em; margin-bottom: 0.1rem;
-}
-.dash-sub {
-    font-size: 0.8rem; color: #484f58;
-    letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 1.5rem;
-}
-
-.metric-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-    gap: 0.6rem; margin-bottom: 1.5rem;
-}
-.metric-card {
-    background: #161b22; border: 1px solid #21262d;
-    border-radius: 8px; padding: 0.8rem 1rem;
-    border-top: 2px solid var(--accent);
-}
-.metric-label {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 0.6rem; color: #484f58;
-    text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.3rem;
-}
-.metric-value {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 1.3rem; font-weight: 600;
-    color: var(--accent); line-height: 1;
-}
-.metric-unit { font-size: 0.65rem; color: #484f58; margin-left: 0.15rem; }
-
-section[data-testid="stSidebar"] {
-    background-color: #0d1117; border-right: 1px solid #21262d;
-}
-section[data-testid="stSidebar"] label {
-    color: #8b949e !important; font-size: 0.8rem !important;
-}
-
-.stDownloadButton > button {
-    background: #161b22 !important; color: #58a6ff !important;
-    border: 1px solid #30363d !important;
-    font-family: 'IBM Plex Mono', monospace !important;
-    font-size: 0.75rem !important; border-radius: 6px !important;
-}
-.stDownloadButton > button:hover {
-    border-color: #58a6ff !important; background: #1c2128 !important;
-}
-
-.stTabs [data-baseweb="tab-list"] {
-    background: #161b22; border-radius: 6px; gap: 0; padding: 2px;
-}
-.stTabs [data-baseweb="tab"] {
-    font-family: 'IBM Plex Mono', monospace; font-size: 0.68rem;
-    color: #484f58; text-transform: uppercase; letter-spacing: 0.05em;
-    padding: 0.35rem 0.9rem; border-radius: 5px;
-}
-.stTabs [aria-selected="true"] {
-    background: #1c2128 !important; color: #58a6ff !important;
-}
-
-.stCheckbox label { color: #cdd9e5 !important; font-size: 0.83rem !important; }
-
+.dash-header { font-family:'IBM Plex Mono',monospace; font-size:1.5rem; font-weight:600; color:#58a6ff; margin-bottom:0.1rem; }
+.dash-sub { font-size:0.8rem; color:#484f58; letter-spacing:0.08em; text-transform:uppercase; margin-bottom:1.5rem; }
+.metric-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:0.6rem; margin-bottom:1.5rem; }
+.metric-card { background:#161b22; border:1px solid #21262d; border-radius:8px; padding:0.8rem 1rem; border-top:2px solid var(--accent); }
+.metric-label { font-family:'IBM Plex Mono',monospace; font-size:0.6rem; color:#484f58; text-transform:uppercase; letter-spacing:0.1em; margin-bottom:0.3rem; }
+.metric-value { font-family:'IBM Plex Mono',monospace; font-size:1.3rem; font-weight:600; color:var(--accent); line-height:1; }
+.metric-unit { font-size:0.65rem; color:#484f58; margin-left:0.15rem; }
+section[data-testid="stSidebar"] { background-color:#0d1117; border-right:1px solid #21262d; }
+section[data-testid="stSidebar"] label { color:#8b949e !important; font-size:0.8rem !important; }
+.stDownloadButton > button { background:#161b22 !important; color:#58a6ff !important; border:1px solid #30363d !important; font-family:'IBM Plex Mono',monospace !important; font-size:0.75rem !important; border-radius:6px !important; }
+.stTabs [data-baseweb="tab-list"] { background:#161b22; border-radius:6px; gap:0; padding:2px; }
+.stTabs [data-baseweb="tab"] { font-family:'IBM Plex Mono',monospace; font-size:0.68rem; color:#484f58; text-transform:uppercase; letter-spacing:0.05em; padding:0.35rem 0.9rem; border-radius:5px; }
+.stTabs [aria-selected="true"] { background:#1c2128 !important; color:#58a6ff !important; }
+.stCheckbox label { color:#cdd9e5 !important; font-size:0.83rem !important; }
 .chip-on  { background:#0d2818; color:#3fb950; border:1px solid #238636; padding:1px 9px; border-radius:20px; font-family:'IBM Plex Mono',monospace; font-size:0.72rem; display:inline-block; }
 .chip-off { background:#1f1208; color:#d29922; border:1px solid #9e6a03; padding:1px 9px; border-radius:20px; font-family:'IBM Plex Mono',monospace; font-size:0.72rem; display:inline-block; }
-
 .info-box { background:#0d1f38; border:1px solid #1f4068; border-radius:8px; padding:0.7rem 1rem; margin:0.5rem 0; font-size:0.82rem; color:#58a6ff; }
 .warn-box { background:#1f1208; border:1px solid #9e6a03; border-radius:8px; padding:0.7rem 1rem; margin:0.5rem 0; font-size:0.82rem; color:#d29922; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Column config ──────────────────────────────────────────────────────────────
+# ── Constants ─────────────────────────────────────────────────────────────────
 TIMESTAMP_COL = "Timestamp"
 
 NUMERIC_COLS = {
@@ -111,8 +58,10 @@ NUMERIC_COLS = {
     "I2C_err":   {"label": "I2C Errors",   "unit": "",    "color": "#ff7b72"},
 }
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
-def load_csv(file) -> pd.DataFrame:
+DEFAULT_ON = {"O2_avg_%", "CO2_ppm", "Temp_C"}
+
+# ── Helper functions ──────────────────────────────────────────────────────────
+def load_csv(file):
     df = pd.read_csv(
         file,
         on_bad_lines="skip",
@@ -159,6 +108,44 @@ def flag_anomalies(series, threshold=3.0):
     return z.abs() > threshold
 
 
+def add_fan_vrects(fig, df, fan_col, n_rows):
+    """Draw fan-ON shaded bands across all subplot rows."""
+    fan_mask = get_fan_on_mask(df, fan_col)
+    times = df[TIMESTAMP_COL].tolist()
+    in_block = False
+    block_start = None
+
+    for ts, is_on in zip(times, fan_mask):
+        if is_on and not in_block:
+            block_start = ts
+            in_block = True
+        elif not is_on and in_block:
+            for r in range(1, n_rows + 1):
+                fig.add_vrect(
+                    x0=block_start, x1=ts,
+                    fillcolor="rgba(88,166,255,0.1)",
+                    layer="below", line_width=0,
+                    row=r, col=1,
+                )
+            in_block = False
+
+    if in_block:
+        for r in range(1, n_rows + 1):
+            fig.add_vrect(
+                x0=block_start, x1=times[-1],
+                fillcolor="rgba(88,166,255,0.1)",
+                layer="below", line_width=0,
+                row=r, col=1,
+            )
+
+    # Invisible trace for legend
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None], mode="markers",
+        marker=dict(size=10, color="rgba(88,166,255,0.3)", symbol="square"),
+        name="Fan ON", showlegend=True,
+    ), row=1, col=1)
+
+
 def plotly_base():
     return dict(
         paper_bgcolor="rgba(0,0,0,0)",
@@ -168,14 +155,14 @@ def plotly_base():
             bgcolor="rgba(13,17,23,0.9)", bordercolor="#30363d", borderwidth=1,
             font=dict(size=10, family="IBM Plex Mono, monospace", color="#cdd9e5"),
         ),
-        margin=dict(l=55, r=20, t=35, b=40),
+        margin=dict(l=60, r=20, t=30, b=40),
         hovermode="x unified",
         hoverlabel=dict(bgcolor="#161b22", bordercolor="#30363d",
                         font=dict(color="#cdd9e5", size=11)),
     )
 
 
-# ── Sidebar ────────────────────────────────────────────────────────────────────
+# ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("**📂 Upload**")
     uploaded = st.file_uploader("CSV file", type=["csv"], label_visibility="collapsed")
@@ -207,13 +194,12 @@ with st.sidebar:
 
         st.markdown("---")
         st.markdown("**📊 Variables**")
-        default_on = {"O2_avg_%", "CO2_ppm", "Temp_C"}
         selected_cols = [
             c for c in present_numeric
             if st.checkbox(
                 f"{NUMERIC_COLS[c]['label']} ({NUMERIC_COLS[c]['unit']})"
                 if NUMERIC_COLS[c]['unit'] else NUMERIC_COLS[c]['label'],
-                value=(c in default_on),
+                value=(c in DEFAULT_ON),
                 key=c,
             )
         ]
@@ -223,7 +209,7 @@ with st.sidebar:
         rolling_window = st.slider(
             "Window (rows) — 1 = raw",
             1, 120, 1,
-            help="1 = raw data, every point shown. Higher = smoother but hides variation. At 10s intervals: window 6 ≈ 1 min average."
+            help="1 = raw data. Higher = smoother. At 10s intervals: window 6 ≈ 1 min average."
         )
         show_raw_under = False
         if rolling_window > 1:
@@ -232,7 +218,7 @@ with st.sidebar:
         st.markdown("---")
         st.markdown("**⚙️ Options**")
         show_anomalies = st.checkbox("Flag O₂ anomalies", value=True)
-        show_fan_band  = st.checkbox("Show fan ON/OFF band", value=True)
+        show_fan_band  = st.checkbox("Show fan ON/OFF bands", value=True)
 
     else:
         df = None
@@ -243,7 +229,7 @@ with st.sidebar:
         show_fan_band  = True
         fan_col = None
 
-# ── Main ───────────────────────────────────────────────────────────────────────
+# ── Header ────────────────────────────────────────────────────────────────────
 st.markdown('<div class="dash-header">🌱 Compost Monitor</div>', unsafe_allow_html=True)
 st.markdown('<div class="dash-sub">Arduino · O₂ · CO₂ · Temperature · Fan</div>', unsafe_allow_html=True)
 
@@ -255,7 +241,7 @@ if df is None:
     </div>""", unsafe_allow_html=True)
     st.stop()
 
-# ── Metric cards ───────────────────────────────────────────────────────────────
+# ── Metric cards ──────────────────────────────────────────────────────────────
 key_metrics = [
     ("O2_avg_%", "#58a6ff"),
     ("CO2_ppm",  "#ffa657"),
@@ -274,7 +260,6 @@ for col, accent in key_metrics:
             f'<div class="metric-value">{val:.1f}<span class="metric-unit">{info["unit"]}</span></div>'
             f'</div>'
         )
-
 if fan_col:
     fan_series = df[fan_col].dropna()
     if not fan_series.empty:
@@ -289,7 +274,6 @@ if fan_col:
             f'<div style="margin-top:5px"><span class="{chip_class}">{label}{suffix}</span></div>'
             f'</div>'
         )
-
 metrics_html += (
     f'<div class="metric-card" style="--accent:#484f58">'
     f'<div class="metric-label">Rows</div>'
@@ -299,131 +283,117 @@ metrics_html += (
 metrics_html += "</div>"
 st.markdown(metrics_html, unsafe_allow_html=True)
 
-# ── Anomaly warning ────────────────────────────────────────────────────────────
+# ── Anomaly warning ───────────────────────────────────────────────────────────
 if "O2_avg_%" in df.columns and show_anomalies:
     n_anom = int(flag_anomalies(df["O2_avg_%"]).sum())
     if n_anom > 0:
         st.markdown(
             f'<div class="warn-box">⚠️ <b>{n_anom} anomalous O₂ readings</b> in this window '
-            f'(rolling z-score > 3σ) — shown as orange markers on the chart.</div>',
-            unsafe_allow_html=True
+            f'(rolling z-score > 3σ) — shown as orange markers.</div>',
+            unsafe_allow_html=True,
         )
 
-# ── Tabs ───────────────────────────────────────────────────────────────────────
+# ── Tabs ──────────────────────────────────────────────────────────────────────
 tab1, tab2, tab3 = st.tabs(["📈  Time Series", "🔍  Data Preview", "💾  Download"])
 
-# ════════════════════════════ TAB 1: CHART ════════════════════════════════════
+# ── TAB 1: Chart ──────────────────────────────────────────────────────────────
 with tab1:
     if not selected_cols:
         st.info("Select at least one variable in the sidebar.")
     else:
-        show_band = show_fan_band and fan_col is not None
+        # One subplot per variable
+        n_rows = len(selected_cols)
+        row_heights = [1.0] * n_rows
+        total = sum(row_heights)
+        row_heights = [r / total for r in row_heights]
 
-        if show_band:
-            fig = make_subplots(
-                rows=2, cols=1,
-                shared_xaxes=True,
-                row_heights=[0.84, 0.16],
-                vertical_spacing=0.03,
-            )
-            main_row, band_row = 1, 2
-        else:
-            fig = make_subplots(rows=1, cols=1)
-            main_row = 1
+        subplot_titles = [
+            f"{NUMERIC_COLS[c]['label']} ({NUMERIC_COLS[c]['unit']})"
+            if NUMERIC_COLS[c]['unit'] else NUMERIC_COLS[c]['label']
+            for c in selected_cols
+        ]
 
-        base = plotly_base()
+        fig = make_subplots(
+            rows=n_rows,
+            cols=1,
+            shared_xaxes=True,
+            row_heights=row_heights,
+            vertical_spacing=0.06,
+            subplot_titles=subplot_titles,
+        )
 
-        # ── Sensor traces — all on one axis ───────────────────────────────────
-        for col in selected_cols:
+        # Add fan ON bands as vertical shading across all subplots
+        if show_fan_band and fan_col is not None and len(df) > 1:
+            add_fan_vrects(fig, df, fan_col, n_rows)
+
+        # Add one trace per variable on its own subplot
+        for i, col in enumerate(selected_cols):
+            row = i + 1
             info = NUMERIC_COLS[col]
             color = info["color"]
             y_raw  = df[col]
             y_plot = apply_rolling(y_raw, rolling_window)
 
+            # Faint raw underneath when smoothing
             if rolling_window > 1 and show_raw_under:
                 fig.add_trace(go.Scatter(
                     x=df[TIMESTAMP_COL], y=y_raw,
                     name=f"{info['label']} raw",
                     line=dict(color=color, width=0.8),
-                    opacity=0.18,
+                    opacity=0.2,
                     showlegend=False,
                     hoverinfo="skip",
-                ), row=main_row, col=1)
+                ), row=row, col=1)
 
+            # Main line
             fig.add_trace(go.Scatter(
-                x=df[TIMESTAMP_COL], y=y_plot,
+                x=df[TIMESTAMP_COL],
+                y=y_plot,
                 name=info["label"],
                 line=dict(color=color, width=1.8),
                 hovertemplate=f"<b>{info['label']}</b>: %{{y:.2f}} {info['unit']}<extra></extra>",
-            ), row=main_row, col=1)
+            ), row=row, col=1)
 
-            # Anomaly markers
+            # Anomaly markers for O2
             if show_anomalies and col in ("O2_raw_%", "O2_avg_%"):
                 mask = flag_anomalies(y_raw)
                 if mask.any():
                     fig.add_trace(go.Scatter(
-                        x=df.loc[mask, TIMESTAMP_COL], y=y_raw[mask],
-                        mode="markers", name="⚠ O₂ spike",
+                        x=df.loc[mask, TIMESTAMP_COL],
+                        y=y_raw[mask],
+                        mode="markers",
+                        name="⚠ O₂ spike",
                         marker=dict(color="#f0883e", size=8, symbol="x-thin",
                                     line=dict(width=2, color="#f0883e")),
                         hovertemplate="<b>⚠ spike</b>: %{y:.2f}%<extra></extra>",
-                    ), row=main_row, col=1)
+                        showlegend=(i == 0),
+                    ), row=row, col=1)
 
-       # ── Fan shading as vrect on every subplot ─────────────────────────────
-        if show_band:
-            fan_mask = get_fan_on_mask(df, fan_col)
-            times = df[TIMESTAMP_COL].values
-            in_block = False
-            block_start = None
+            # Y-axis styling per subplot
+            fig.update_yaxes(
+                row=row, col=1,
+                tickfont=dict(size=9, color="#8b949e"),
+                gridcolor="#21262d",
+                linecolor="#30363d",
+                title_font=dict(size=10, color=color),
+            )
 
-            # Find contiguous ON blocks and draw a vrect on every sensor row
-            for ts, is_on in zip(times, fan_mask):
-                if is_on and not in_block:
-                    block_start = ts
-                    in_block = True
-                elif not is_on and in_block:
-                    for row in range(1, n_sensor_rows + 1):
-                        fig.add_vrect(
-                            x0=block_start, x1=ts,
-                            fillcolor="rgba(63,185,80,0.12)",
-                            layer="below", line_width=0,
-                            row=row, col=1,
-                        )
-                    in_block = False
-            # Close last open block
-            if in_block:
-                for row in range(1, n_sensor_rows + 1):
-                    fig.add_vrect(
-                        x0=block_start, x1=times[-1],
-                        fillcolor="rgba(63,185,80,0.12)",
-                        layer="below", line_width=0,
-                        row=row, col=1,
-                    )
+        # Subplot title styling
+        for annotation in fig.layout.annotations:
+            annotation.font.size = 11
+            annotation.font.color = "#8b949e"
 
-            # Add one invisible trace just for the legend entry
-            fig.add_trace(go.Scatter(
-                x=[None], y=[None],
-                mode="markers",
-                marker=dict(size=10, color="rgba(63,185,80,0.5)", symbol="square"),
-                name="Fan ON",
-                showlegend=True,
-            ), row=1, col=1)
-
-        # ── Shared layout ─────────────────────────────────────────────────────
-        fig.update_layout(height=520 if show_band else 460, **base)
+        # Overall layout
+        chart_height = max(300, 220 * n_rows)
+        fig.update_layout(height=chart_height, **plotly_base())
         fig.update_xaxes(
-            gridcolor="#21262d", linecolor="#30363d",
-            tickfont=dict(size=10, color="#8b949e"),
-        )
-        fig.update_yaxes(
-            row=main_row, col=1,
-            gridcolor="#21262d", linecolor="#30363d",
+            gridcolor="#21262d",
+            linecolor="#30363d",
             tickfont=dict(size=10, color="#8b949e"),
         )
 
         st.plotly_chart(fig, use_container_width=True)
 
-        # Rolling window info
         if rolling_window > 1 and len(df) > 1:
             interval_sec = df[TIMESTAMP_COL].diff().median().total_seconds()
             smoothed_min = rolling_window * interval_sec / 60
@@ -434,7 +404,7 @@ with tab1:
                 unsafe_allow_html=True,
             )
 
-# ════════════════════════════ TAB 2: PREVIEW ══════════════════════════════════
+# ── TAB 2: Preview ────────────────────────────────────────────────────────────
 with tab2:
     st.markdown(
         f'<span style="color:#484f58;font-size:0.78rem;font-family:IBM Plex Mono">'
@@ -449,7 +419,7 @@ with tab2:
             st.dataframe(stats.style.format("{:.3f}"), use_container_width=True)
     st.dataframe(df.reset_index(drop=True), use_container_width=True, height=420)
 
-# ════════════════════════════ TAB 3: DOWNLOAD ════════════════════════════════
+# ── TAB 3: Download ───────────────────────────────────────────────────────────
 with tab3:
     st.markdown("#### Download filtered data")
     csv_bytes = df.to_csv(index=False).encode("utf-8")
