@@ -109,42 +109,44 @@ def flag_anomalies(series, threshold=3.0):
 
 
 def add_fan_vrects(fig, df, fan_col, n_rows):
-    """Draw fan-ON shaded bands across all subplot rows."""
+    """Draw fan-ON shaded bands across all subplot rows using add_shape."""
     fan_mask = get_fan_on_mask(df, fan_col)
     times = df[TIMESTAMP_COL].tolist()
     in_block = False
     block_start = None
 
+    blocks = []
     for ts, is_on in zip(times, fan_mask):
         if is_on and not in_block:
             block_start = ts
             in_block = True
         elif not is_on and in_block:
-            for r in range(1, n_rows + 1):
-                fig.add_vrect(
-                    x0=block_start, x1=ts,
-                    fillcolor="rgba(88,166,255,0.1)",
-                    layer="below", line_width=0,
-                    row=r, col=1,
-                )
+            blocks.append((block_start, ts))
             in_block = False
-
     if in_block:
-        for r in range(1, n_rows + 1):
-            fig.add_vrect(
-                x0=block_start, x1=times[-1],
-                fillcolor="rgba(88,166,255,0.1)",
-                layer="below", line_width=0,
-                row=r, col=1,
+        blocks.append((block_start, times[-1]))
+
+    # add_shape with xref/yref works reliably across shared-x subplots
+    for r in range(1, n_rows + 1):
+        xref = "x" if r == 1 else f"x{r}"
+        yref = "y domain" if r == 1 else f"y{r} domain"
+        for t0, t1 in blocks:
+            fig.add_shape(
+                type="rect",
+                xref=xref, yref=yref,
+                x0=t0, x1=t1,
+                y0=0, y1=1,
+                fillcolor="rgba(88,166,255,0.12)",
+                line_width=0,
+                layer="below",
             )
 
-    # Invisible trace for legend
+    # Legend entry (added as a separate trace that won't interfere)
     fig.add_trace(go.Scatter(
         x=[None], y=[None], mode="markers",
-        marker=dict(size=10, color="rgba(88,166,255,0.3)", symbol="square"),
+        marker=dict(size=10, color="rgba(88,166,255,0.35)", symbol="square"),
         name="Fan ON", showlegend=True,
-    ), row=1, col=1)
-
+    ), row=n_rows, col=1)
 
 def plotly_base():
     return dict(
