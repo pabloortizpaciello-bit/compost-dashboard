@@ -190,22 +190,32 @@ TIMESTAMP_COL = "Timestamp"
 
 NUMERIC_COLS = {
     "O2_raw_%":   {"label": "O₂ Raw",        "unit": "%",    "color": "#4fc3f7", "accent": "#4fc3f7"},
-    "O2_avg_%":   {"label": "O₂ Avg",         "unit": "%",    "color": "#7ec850", "accent": "#7ec850"},
-    "CO2_ppm":    {"label": "CO₂",            "unit": "ppm",  "color": "#ff8a65", "accent": "#ff8a65"},
-    "CO2_%":      {"label": "CO₂",            "unit": "%",    "color": "#ffb74d", "accent": "#ffb74d"},
-    "Temp_C":     {"label": "Temp (probe)",   "unit": "°C",   "color": "#ef5350", "accent": "#ef5350"},
-    "RTC_C":      {"label": "Temp (RTC)",     "unit": "°C",   "color": "#ec407a", "accent": "#ec407a"},
-    "CycleSec":   {"label": "Cycle Time",     "unit": "s",    "color": "#ab47bc", "accent": "#ab47bc"},
-    "CycleNum":   {"label": "Cycle #",        "unit": "",     "color": "#26c6da", "accent": "#26c6da"},
-    "Spikes":     {"label": "O₂ Spikes",      "unit": "",     "color": "#ffa726", "accent": "#ffa726"},
-    "I2C_err":    {"label": "I2C Errors",     "unit": "",     "color": "#ef5350", "accent": "#ef5350"},
+    "O2_avg_%":   {"label": "O₂ Avg",        "unit": "%",    "color": "#7ec850", "accent": "#7ec850"},
+    "CO2_ppm":    {"label": "CO₂",           "unit": "ppm",  "color": "#ff8a65", "accent": "#ff8a65"},
+    "CO2_%":      {"label": "CO₂",           "unit": "%",    "color": "#ffb74d", "accent": "#ffb74d"},
+    "Temp_C":     {"label": "Temp (probe)",  "unit": "°C",   "color": "#ef5350", "accent": "#ef5350"},
+    "RTC_C":      {"label": "Temp (RTC)",    "unit": "°C",   "color": "#ec407a", "accent": "#ec407a"},
+    # older firmware columns
+    "Hz":         {"label": "Fan Speed",     "unit": "Hz",   "color": "#ab47bc", "accent": "#ab47bc"},
+    "Step":       {"label": "Fan Step",      "unit": "",     "color": "#26c6da", "accent": "#26c6da"},
+    # newer firmware columns
+    "CycleSec":   {"label": "Cycle Time",    "unit": "s",    "color": "#ab47bc", "accent": "#ab47bc"},
+    "CycleNum":   {"label": "Cycle #",       "unit": "",     "color": "#26c6da", "accent": "#26c6da"},
+    "Spikes":     {"label": "O₂ Spikes",     "unit": "",     "color": "#ffa726", "accent": "#ffa726"},
+    "I2C_err":    {"label": "I2C Errors",    "unit": "",     "color": "#ef5350", "accent": "#ef5350"},
 }
 
-CATEGORICAL_COLS = ["FanState"]
+CATEGORICAL_COLS = ["FanState"]  # newer firmware; gracefully absent in older CSVs
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def load_csv(file) -> pd.DataFrame:
-    df = pd.read_csv(file)
+    df = pd.read_csv(
+        file,
+        on_bad_lines="skip",
+        engine="python",
+        encoding="utf-8",
+        encoding_errors="ignore",
+    )
     df.columns = df.columns.str.strip()
     if TIMESTAMP_COL in df.columns:
         df[TIMESTAMP_COL] = pd.to_datetime(df[TIMESTAMP_COL], errors="coerce")
@@ -348,6 +358,14 @@ if "FanState" in df.columns:
         <div class="metric-label">Fan</div>
         <div style="margin-top:4px"><span class="{chip_class}">{last_fan}</span></div>
     </div>"""
+elif "Hz" in df.columns:
+    last_hz = df["Hz"].dropna().iloc[-1] if not df["Hz"].dropna().empty else 0
+    chip_class = "fan-on" if float(last_hz) > 0 else "fan-off"
+    metrics_html += f"""
+    <div class="metric-card" style="--accent:#ab47bc">
+        <div class="metric-label">Fan Speed</div>
+        <div style="margin-top:4px"><span class="{chip_class}">{last_hz} Hz</span></div>
+    </div>"""
 
 # Row count
 metrics_html += f"""
@@ -431,8 +449,13 @@ with tab1:
             add_traces(temp_cols, 2)
 
         # FanState as background shading on row 1
+        # Support both newer firmware (FanState) and older (Step/Hz)
         if "FanState" in df_plot.columns and len(df_plot) > 1:
             fan_on = df_plot["FanState"].str.upper() == "ON"
+        elif "Hz" in df_plot.columns and len(df_plot) > 1:
+            fan_on = df_plot["Hz"].fillna(0) > 0
+        else:
+            fan_on = None
             in_block = False
             block_start = None
             for i, (ts, is_on) in enumerate(zip(df_plot[TIMESTAMP_COL], fan_on)):
