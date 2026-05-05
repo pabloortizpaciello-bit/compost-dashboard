@@ -270,7 +270,7 @@ with st.sidebar:
             label_visibility="collapsed",
         )
 
-        if range_mode == "Last N hours":
+if range_mode == "Last N hours":
             n_h = st.slider("Hours", 1, min(int(total_hours), 720), min(24, int(total_hours)))
             t_start = t_max - timedelta(hours=n_h)
         elif range_mode == "Last N days":
@@ -280,7 +280,27 @@ with st.sidebar:
         else:
             t_start = t_min
 
-        df = df_raw[df_raw[TIMESTAMP_COL] >= t_start].copy().reset_index(drop=True)
+        st.markdown("**✂️ Fine-tune Range**")
+        col_a, col_b = st.columns(2)
+        with col_a:
+            date_start = st.date_input("From", value=t_start.date(),
+                                       min_value=t_min.date(), max_value=t_max.date())
+            time_start = st.time_input("", value=t_start.time(), key="time_start",
+                                       label_visibility="collapsed")
+        with col_b:
+            date_end = st.date_input("To", value=t_max.date(),
+                                     min_value=t_min.date(), max_value=t_max.date())
+            time_end = st.time_input("", value=t_max.time(), key="time_end",
+                                     label_visibility="collapsed")
+
+        import datetime
+        t_start = pd.Timestamp(datetime.datetime.combine(date_start, time_start))
+        t_end   = pd.Timestamp(datetime.datetime.combine(date_end,   time_end))
+
+        df = df_raw[
+            (df_raw[TIMESTAMP_COL] >= t_start) &
+            (df_raw[TIMESTAMP_COL] <= t_end)
+        ].copy().reset_index(drop=True)
 
         st.markdown("---")
         st.markdown("**📊 Variables**")
