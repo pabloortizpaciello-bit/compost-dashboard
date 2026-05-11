@@ -47,6 +47,10 @@ TIMESTAMP_COL = "Timestamp"
 PROBE_COLS    = ["Probe1_C", "Probe2_C", "Probe3_C"]
 PROBE_MEAN    = "ProbeMean_C"
 
+# Phantom axis index used for legend-only traces. Must be higher than any
+# subplot row you'd ever realistically use.
+PHANTOM_AXIS = 99
+
 PROBE_COUNT_COLORS = {
     3: "#3fb950",   # green  — all three valid
     2: "#d29922",   # yellow — two valid
@@ -131,6 +135,45 @@ def probe_count_series(df):
     return df[available].notna().sum(axis=1)
 
 
+def add_legend_only_trace(fig, name, color, symbol="square", size=12):
+    """
+    Add a legend-only marker by placing the trace on a non-existent
+    (phantom) axis. This prevents the dummy trace from polluting the
+    autorange of any real subplot's x or y axis.
+
+    Caller is responsible for ensuring the phantom axes have been
+    declared in the layout (see ensure_phantom_axes).
+    """
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None],
+        mode="markers",
+        marker=dict(size=size, color=color, symbol=symbol),
+        name=name,
+        showlegend=True,
+        xaxis=f"x{PHANTOM_AXIS}",
+        yaxis=f"y{PHANTOM_AXIS}",
+        hoverinfo="skip",
+    ))
+
+
+def ensure_phantom_axes(fig):
+    """
+    Declare invisible phantom axes used by legend-only traces.
+    `domain=[0, 0.001]` clamps them to a 0.1% sliver in the corner as
+    belt-and-suspenders insurance against any accidental rendering.
+    """
+    fig.update_layout(**{
+        f"xaxis{PHANTOM_AXIS}": dict(
+            visible=False, showgrid=False, zeroline=False,
+            showticklabels=False, fixedrange=True, domain=[0, 0.001],
+        ),
+        f"yaxis{PHANTOM_AXIS}": dict(
+            visible=False, showgrid=False, zeroline=False,
+            showticklabels=False, fixedrange=True, domain=[0, 0.001],
+        ),
+    })
+
+
 def add_probe_mean_traces(fig, df, row, rolling_window, show_raw_under, legend_shown):
     """
     Draw ProbeMean_C as colored segments by probe count.
@@ -153,7 +196,6 @@ def add_probe_mean_traces(fig, df, row, rolling_window, show_raw_under, legend_s
         ), row=row, col=1)
 
     # Split into contiguous segments by probe count
-    # Build segments: list of (start_idx, end_idx, count)
     segments = []
     if len(df) == 0:
         return legend_shown
@@ -175,7 +217,6 @@ def add_probe_mean_traces(fig, df, row, rolling_window, show_raw_under, legend_s
         end_idx = min(seg_end + 1, len(df))
         seg_df   = df.iloc[seg_start:end_idx]
         seg_y    = y_plot.iloc[seg_start:end_idx]
-        seg_y_raw = y_raw.iloc[seg_start:end_idx]
         color    = PROBE_COUNT_COLORS.get(count, "#484f58")
         label    = count_labels.get(count, "unknown")
         show_leg = label not in legend_shown
@@ -200,7 +241,11 @@ def add_probe_mean_traces(fig, df, row, rolling_window, show_raw_under, legend_s
 
 
 def add_fan_vrects(fig, df, fan_col, n_rows):
-    """Draw fan-ON shaded bands on all subplots using add_shape."""
+    """
+    Draw fan-ON shaded bands on all subplots using add_shape, and add a
+    legend entry for 'Fan ON' on a phantom axis so it doesn't corrupt
+    any real subplot.
+    """
     fan_mask = get_fan_on_mask(df, fan_col)
     times    = df[TIMESTAMP_COL].tolist()
     in_block = False
@@ -231,17 +276,14 @@ def add_fan_vrects(fig, df, fan_col, n_rows):
                 layer="below",
             )
 
-# Fan ON legend — added to row 1 but with xaxis/yaxis set to a
-    # non-existent axis so it doesn't interfere with any real subplot
-    fig.add_trace(go.Scatter(
-        x=[None], y=[None],
-        mode="markers",
-        marker=dict(size=12, color="rgba(88,166,255,0.35)", symbol="square"),
+    # Legend-only trace on phantom axes (does not touch any real subplot).
+    add_legend_only_trace(
+        fig,
         name="Fan ON",
-        showlegend=True,
-        xaxis="x",
-        yaxis="y999",
-    ))
+        color="rgba(88,166,255,0.35)",
+        symbol="square",
+        size=12,
+    )
 
 
 def plotly_base():
@@ -471,7 +513,12 @@ with tab1:
             subplot_titles=subplot_titles,
         )
 
-        # Fan shading — uses add_shape (no row assignment for legend trace)
+        # Declare phantom axes BEFORE any legend-only traces are added,
+        # so that when the trace references xaxis=x99/yaxis=y99 those
+        # axes already exist as invisible, clamped placeholders.
+        ensure_phantom_axes(fig)
+
+        # Fan shading + legend entry (legend uses phantom axes)
         if show_fan_band and fan_col is not None and len(df) > 1:
             add_fan_vrects(fig, df, fan_col, n_rows)
 
