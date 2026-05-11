@@ -231,14 +231,16 @@ def add_fan_vrects(fig, df, fan_col, n_rows):
                 layer="below",
             )
 
-    # Fan ON legend — use a dummy scatter with no row assignment
-    # so it doesn't touch any subplot axis
+# Fan ON legend — added to row 1 but with xaxis/yaxis set to a
+    # non-existent axis so it doesn't interfere with any real subplot
     fig.add_trace(go.Scatter(
         x=[None], y=[None],
         mode="markers",
         marker=dict(size=12, color="rgba(88,166,255,0.35)", symbol="square"),
         name="Fan ON",
         showlegend=True,
+        xaxis="x",
+        yaxis="y999",
     ))
 
 
