@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import timedelta
@@ -43,25 +44,38 @@ section[data-testid="stSidebar"] label { color:#8b949e !important; font-size:0.8
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 TIMESTAMP_COL = "Timestamp"
+PROBE_COLS    = ["Probe1_C", "Probe2_C", "Probe3_C"]
+PROBE_MEAN    = "ProbeMean_C"
+
+PROBE_COUNT_COLORS = {
+    3: "#3fb950",   # green  — all three valid
+    2: "#d29922",   # yellow — two valid
+    1: "#ff7b72",   # red    — only one valid
+    0: "#484f58",   # grey   — none valid
+}
 
 NUMERIC_COLS = {
-    "O2_raw_%":  {"label": "O₂ Raw",       "unit": "%",   "color": "#79c0ff"},
-    "O2_avg_%":  {"label": "O₂ Avg",       "unit": "%",   "color": "#58a6ff"},
-    "CO2_ppm":   {"label": "CO₂",          "unit": "ppm", "color": "#ffa657"},
-    "CO2_%":     {"label": "CO₂ %",        "unit": "%",   "color": "#ffb77a"},
-    "Temp_C":    {"label": "Temp (probe)", "unit": "°C",  "color": "#ff7b72"},
-    "RTC_C":     {"label": "Temp (RTC)",   "unit": "°C",  "color": "#ffa198"},
-    "Hz":        {"label": "Fan Hz",       "unit": "Hz",  "color": "#d2a8ff"},
-    "Step":      {"label": "Fan Step",     "unit": "",    "color": "#bc8cff"},
-    "CycleSec":  {"label": "Cycle Sec",    "unit": "s",   "color": "#d2a8ff"},
-    "CycleNum":  {"label": "Cycle #",      "unit": "",    "color": "#bc8cff"},
-    "Spikes":    {"label": "O₂ Spikes",    "unit": "",    "color": "#f0883e"},
-    "I2C_err":   {"label": "I2C Errors",   "unit": "",    "color": "#ff7b72"},
+    "O2_raw_%":    {"label": "O₂ Raw",         "unit": "%",   "color": "#79c0ff"},
+    "O2_avg_%":    {"label": "O₂ Avg",         "unit": "%",   "color": "#58a6ff"},
+    "CO2_ppm":     {"label": "CO₂",            "unit": "ppm", "color": "#ffa657"},
+    "CO2_%":       {"label": "CO₂ %",          "unit": "%",   "color": "#ffb77a"},
+    "Temp_C":      {"label": "Temp (probe)",   "unit": "°C",  "color": "#ffa198"},
+    "RTC_C":       {"label": "Temp (RTC)",     "unit": "°C",  "color": "#ffa198"},
+    "ProbeMean_C": {"label": "Probe Mean",     "unit": "°C",  "color": "#3fb950"},
+    "Probe1_C":    {"label": "Probe 1",        "unit": "°C",  "color": "#79c0ff"},
+    "Probe2_C":    {"label": "Probe 2",        "unit": "°C",  "color": "#d2a8ff"},
+    "Probe3_C":    {"label": "Probe 3",        "unit": "°C",  "color": "#ffa657"},
+    "Hz":          {"label": "Fan Hz",         "unit": "Hz",  "color": "#d2a8ff"},
+    "Step":        {"label": "Fan Step",       "unit": "",    "color": "#bc8cff"},
+    "CycleSec":    {"label": "Cycle Sec",      "unit": "s",   "color": "#d2a8ff"},
+    "CycleNum":    {"label": "Cycle #",        "unit": "",    "color": "#bc8cff"},
+    "Spikes":      {"label": "O₂ Spikes",      "unit": "",    "color": "#f0883e"},
+    "I2C_err":     {"label": "I2C Errors",     "unit": "",    "color": "#ff7b72"},
 }
 
 DEFAULT_ON = {"O2_avg_%", "CO2_ppm", "Temp_C"}
 
-# ── Helper functions ──────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 def load_csv(file):
     df = pd.read_csv(
         file,
@@ -75,7 +89,7 @@ def load_csv(file):
         df[TIMESTAMP_COL] = pd.to_datetime(df[TIMESTAMP_COL], errors="coerce")
         df = df.dropna(subset=[TIMESTAMP_COL])
         df = df.sort_values(TIMESTAMP_COL).reset_index(drop=True)
-    for col in NUMERIC_COLS:
+    for col in list(NUMERIC_COLS.keys()) + PROBE_COLS:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
@@ -109,17 +123,94 @@ def flag_anomalies(series, threshold=3.0):
     return z.abs() > threshold
 
 
+def probe_count_series(df):
+    """Count how many of Probe1/2/3 are non-NA per row."""
+    available = [c for c in PROBE_COLS if c in df.columns]
+    if not available:
+        return pd.Series(0, index=df.index)
+    return df[available].notna().sum(axis=1)
+
+
+def add_probe_mean_traces(fig, df, row, rolling_window, show_raw_under, legend_shown):
+    """
+    Draw ProbeMean_C as colored segments by probe count.
+    green=3, yellow=2, red=1.
+    Returns updated legend_shown set.
+    """
+    counts = probe_count_series(df)
+    y_raw  = df[PROBE_MEAN]
+    y_plot = apply_rolling(y_raw, rolling_window)
+
+    # Raw underneath if smoothing
+    if rolling_window > 1 and show_raw_under:
+        fig.add_trace(go.Scatter(
+            x=df[TIMESTAMP_COL], y=y_raw,
+            name="Probe Mean raw",
+            line=dict(color="#3fb950", width=0.8),
+            opacity=0.2,
+            showlegend=False,
+            hoverinfo="skip",
+        ), row=row, col=1)
+
+    # Split into contiguous segments by probe count
+    # Build segments: list of (start_idx, end_idx, count)
+    segments = []
+    if len(df) == 0:
+        return legend_shown
+
+    current_count = counts.iloc[0]
+    seg_start = 0
+
+    for idx in range(1, len(df)):
+        if counts.iloc[idx] != current_count:
+            segments.append((seg_start, idx, current_count))
+            seg_start = idx
+            current_count = counts.iloc[idx]
+    segments.append((seg_start, len(df), current_count))
+
+    count_labels = {3: "3 probes", 2: "2 probes", 1: "1 probe", 0: "no probe"}
+
+    for seg_start, seg_end, count in segments:
+        # Extend one point to avoid gaps between segments
+        end_idx = min(seg_end + 1, len(df))
+        seg_df   = df.iloc[seg_start:end_idx]
+        seg_y    = y_plot.iloc[seg_start:end_idx]
+        seg_y_raw = y_raw.iloc[seg_start:end_idx]
+        color    = PROBE_COUNT_COLORS.get(count, "#484f58")
+        label    = count_labels.get(count, "unknown")
+        show_leg = label not in legend_shown
+
+        fig.add_trace(go.Scatter(
+            x=seg_df[TIMESTAMP_COL],
+            y=seg_y,
+            name=label,
+            legendgroup=label,
+            showlegend=show_leg,
+            line=dict(color=color, width=2),
+            hovertemplate=(
+                f"<b>Probe Mean</b>: %{{y:.2f}} °C<br>"
+                f"<b>Active probes</b>: {count}<extra></extra>"
+            ),
+        ), row=row, col=1)
+
+        if show_leg:
+            legend_shown.add(label)
+
+    return legend_shown
+
+
 def add_fan_vrects(fig, df, fan_col, n_rows):
+    """Draw fan-ON shaded bands on all subplots using add_shape."""
     fan_mask = get_fan_on_mask(df, fan_col)
-    times = df[TIMESTAMP_COL].tolist()
+    times    = df[TIMESTAMP_COL].tolist()
     in_block = False
     block_start = None
-    blocks = []
+    blocks   = []
 
     for ts, is_on in zip(times, fan_mask):
         if is_on and not in_block:
             block_start = ts
-            in_block = True
+            in_block    = True
         elif not is_on and in_block:
             blocks.append((block_start, ts))
             in_block = False
@@ -132,23 +223,23 @@ def add_fan_vrects(fig, df, fan_col, n_rows):
         for t0, t1 in blocks:
             fig.add_shape(
                 type="rect",
-                xref=xref,
-                yref=yref,
+                xref=xref, yref=yref,
                 x0=t0, x1=t1,
                 y0=0, y1=1,
-                fillcolor="rgba(88,166,255,0.12)",
+                fillcolor="rgba(88,166,255,0.10)",
                 line_width=0,
                 layer="below",
             )
 
-    # Legend entry only — added to last row to avoid interfering with row 1 traces
+    # Fan ON legend — use a dummy scatter with no row assignment
+    # so it doesn't touch any subplot axis
     fig.add_trace(go.Scatter(
         x=[None], y=[None],
         mode="markers",
-        marker=dict(size=10, color="rgba(88,166,255,0.35)", symbol="square"),
+        marker=dict(size=12, color="rgba(88,166,255,0.35)", symbol="square"),
         name="Fan ON",
         showlegend=True,
-    ), row=n_rows, col=1)
+    ))
 
 
 def plotly_base():
@@ -175,7 +266,7 @@ with st.sidebar:
     uploaded = st.file_uploader("CSV file", type=["csv"], label_visibility="collapsed")
 
     if uploaded:
-        df_raw = load_csv(uploaded)
+        df_raw  = load_csv(uploaded)
         fan_col = detect_fan_col(df_raw)
         present_numeric = [c for c in NUMERIC_COLS if c in df_raw.columns]
 
@@ -205,31 +296,23 @@ with st.sidebar:
         col_a, col_b = st.columns(2)
         with col_a:
             date_start = st.date_input(
-                "From date",
-                value=coarse_start.date(),
-                min_value=t_min.date(),
-                max_value=t_max.date(),
+                "From date", value=coarse_start.date(),
+                min_value=t_min.date(), max_value=t_max.date(),
             )
             time_start = st.time_input(
-                "From time",
-                value=coarse_start.time(),
-                key="time_start",
+                "From time", value=coarse_start.time(), key="time_start",
             )
         with col_b:
             date_end = st.date_input(
-                "To date",
-                value=t_max.date(),
-                min_value=t_min.date(),
-                max_value=t_max.date(),
+                "To date", value=t_max.date(),
+                min_value=t_min.date(), max_value=t_max.date(),
             )
             time_end = st.time_input(
-                "To time",
-                value=t_max.time(),
-                key="time_end",
+                "To time", value=t_max.time(), key="time_end",
             )
 
         t_start = pd.Timestamp(datetime.datetime.combine(date_start, time_start))
-        t_end   = pd.Timestamp(datetime.datetime.combine(date_end, time_end))
+        t_end   = pd.Timestamp(datetime.datetime.combine(date_end,   time_end))
 
         if t_start >= t_end:
             st.error("'From' must be before 'To'.")
@@ -257,7 +340,7 @@ with st.sidebar:
         rolling_window = st.slider(
             "Window (rows) — 1 = raw",
             1, 120, 1,
-            help="1 = raw data. Higher = smoother. At 10s intervals: window 6 ≈ 1 min average.",
+            help="1 = raw data. At 10s intervals: window 6 ≈ 1 min average.",
         )
         show_raw_under = False
         if rolling_window > 1:
@@ -269,15 +352,15 @@ with st.sidebar:
         show_fan_band  = st.checkbox("Show fan ON/OFF bands", value=True)
 
     else:
-        df = None
-        t_start = None
-        t_end = None
-        selected_cols = []
+        df             = None
+        t_start        = None
+        t_end          = None
+        selected_cols  = []
         rolling_window = 1
         show_raw_under = False
         show_anomalies = True
         show_fan_band  = True
-        fan_col = None
+        fan_col        = None
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown('<div class="dash-header">🌱 Compost Monitor</div>', unsafe_allow_html=True)
@@ -287,22 +370,24 @@ if df is None:
     st.markdown("""
     <div class="info-box">
     👈 Upload a CSV exported from your Arduino to get started.<br>
-    Supports: <code>Timestamp, O2_raw_%, O2_avg_%, CO2_ppm, CO2_%, Temp_C, RTC_C, Hz, Step, FanState, Spikes, I2C_err</code>
+    Supports: <code>Timestamp, O2_raw_%, O2_avg_%, CO2_ppm, CO2_%, Temp_C, RTC_C,
+    ProbeMean_C, Probe1_C, Probe2_C, Probe3_C, Hz, Step, FanState, Spikes, I2C_err</code>
     </div>""", unsafe_allow_html=True)
     st.stop()
 
 # ── Metric cards ──────────────────────────────────────────────────────────────
 key_metrics = [
-    ("O2_avg_%", "#58a6ff"),
-    ("CO2_ppm",  "#ffa657"),
-    ("Temp_C",   "#ff7b72"),
-    ("RTC_C",    "#ffa198"),
+    ("O2_avg_%",    "#58a6ff"),
+    ("CO2_ppm",     "#ffa657"),
+    ("Temp_C",      "#ff7b72"),
+    ("ProbeMean_C", "#3fb950"),
+    ("RTC_C",       "#ffa198"),
 ]
 metrics_html = '<div class="metric-grid">'
 for col, accent in key_metrics:
     if col in df.columns:
         last = df[col].dropna()
-        val = last.iloc[-1] if not last.empty else float("nan")
+        val  = last.iloc[-1] if not last.empty else float("nan")
         info = NUMERIC_COLS[col]
         metrics_html += (
             f'<div class="metric-card" style="--accent:{accent}">'
@@ -312,19 +397,31 @@ for col, accent in key_metrics:
             f'</div>'
         )
 
+# Probe count chip
+if PROBE_MEAN in df.columns:
+    n_valid = int(probe_count_series(df).iloc[-1]) if len(df) > 0 else 0
+    count_color = PROBE_COUNT_COLORS.get(n_valid, "#484f58")
+    metrics_html += (
+        f'<div class="metric-card" style="--accent:{count_color}">'
+        f'<div class="metric-label">Active Probes</div>'
+        f'<div class="metric-value" style="font-size:1.3rem">{n_valid}'
+        f'<span class="metric-unit">/ 3</span></div>'
+        f'</div>'
+    )
+
 if fan_col:
     fan_series = df[fan_col].dropna()
     if not fan_series.empty:
         last_fan = fan_series.iloc[-1]
-        is_on = (str(last_fan).upper() == "ON") if fan_col == "FanState" else (float(last_fan) > 0)
-        chip_class = "chip-on" if is_on else "chip-off"
-        label = "ON" if is_on else "OFF"
-        suffix = f" · {last_fan} Hz" if fan_col == "Hz" else ""
+        is_on    = (str(last_fan).upper() == "ON") if fan_col == "FanState" else (float(last_fan) > 0)
+        chip_cls = "chip-on" if is_on else "chip-off"
+        label    = "ON" if is_on else "OFF"
+        suffix   = f" · {last_fan} Hz" if fan_col == "Hz" else ""
         metrics_html += (
             f'<div class="metric-card" style="--accent:#3fb950">'
             f'<div class="metric-label">Fan</div>'
             f'<div style="margin-top:5px">'
-            f'<span class="{chip_class}">{label}{suffix}</span></div>'
+            f'<span class="{chip_cls}">{label}{suffix}</span></div>'
             f'</div>'
         )
 
@@ -356,7 +453,6 @@ with tab1:
         st.info("Select at least one variable in the sidebar.")
     else:
         n_rows = len(selected_cols)
-        row_heights = [1.0 / n_rows] * n_rows
 
         subplot_titles = [
             f"{NUMERIC_COLS[c]['label']} ({NUMERIC_COLS[c]['unit']})"
@@ -368,59 +464,68 @@ with tab1:
             rows=n_rows,
             cols=1,
             shared_xaxes=True,
-            row_heights=row_heights,
+            row_heights=[1.0 / n_rows] * n_rows,
             vertical_spacing=0.06,
             subplot_titles=subplot_titles,
         )
 
-        # Fan shading first (drawn below data)
+        # Fan shading — uses add_shape (no row assignment for legend trace)
         if show_fan_band and fan_col is not None and len(df) > 1:
             add_fan_vrects(fig, df, fan_col, n_rows)
 
-        # One trace per variable
+        legend_shown = set()
+
         for i, col in enumerate(selected_cols):
-            row = i + 1
+            row  = i + 1
             info = NUMERIC_COLS[col]
             color = info["color"]
-            y_raw  = df[col]
-            y_plot = apply_rolling(y_raw, rolling_window)
 
-            if rolling_window > 1 and show_raw_under:
+            # Special handling for ProbeMean_C — colored segments by probe count
+            if col == PROBE_MEAN and any(c in df.columns for c in PROBE_COLS):
+                legend_shown = add_probe_mean_traces(
+                    fig, df, row, rolling_window, show_raw_under, legend_shown
+                )
+            else:
+                y_raw  = df[col]
+                y_plot = apply_rolling(y_raw, rolling_window)
+
+                if rolling_window > 1 and show_raw_under:
+                    fig.add_trace(go.Scatter(
+                        x=df[TIMESTAMP_COL], y=y_raw,
+                        name=f"{info['label']} raw",
+                        line=dict(color=color, width=0.8),
+                        opacity=0.2,
+                        showlegend=False,
+                        hoverinfo="skip",
+                    ), row=row, col=1)
+
                 fig.add_trace(go.Scatter(
-                    x=df[TIMESTAMP_COL], y=y_raw,
-                    name=f"{info['label']} raw",
-                    line=dict(color=color, width=0.8),
-                    opacity=0.2,
-                    showlegend=False,
-                    hoverinfo="skip",
+                    x=df[TIMESTAMP_COL],
+                    y=y_plot,
+                    name=info["label"],
+                    line=dict(color=color, width=1.8),
+                    hovertemplate=(
+                        f"<b>{info['label']}</b>: %{{y:.2f}} {info['unit']}<extra></extra>"
+                    ),
                 ), row=row, col=1)
 
-            fig.add_trace(go.Scatter(
-                x=df[TIMESTAMP_COL],
-                y=y_plot,
-                name=info["label"],
-                line=dict(color=color, width=1.8),
-                hovertemplate=(
-                    f"<b>{info['label']}</b>: %{{y:.2f}} {info['unit']}<extra></extra>"
-                ),
-            ), row=row, col=1)
-
-            # Anomaly markers for O2
-            if show_anomalies and col in ("O2_raw_%", "O2_avg_%"):
-                mask = flag_anomalies(y_raw)
-                if mask.any():
-                    fig.add_trace(go.Scatter(
-                        x=df.loc[mask, TIMESTAMP_COL],
-                        y=y_raw[mask],
-                        mode="markers",
-                        name="⚠ O₂ spike",
-                        marker=dict(
-                            color="#f0883e", size=8, symbol="x-thin",
-                            line=dict(width=2, color="#f0883e"),
-                        ),
-                        hovertemplate="<b>⚠ spike</b>: %{y:.2f}%<extra></extra>",
-                        showlegend=(i == 0),
-                    ), row=row, col=1)
+                # O2 anomaly markers
+                if show_anomalies and col in ("O2_raw_%", "O2_avg_%"):
+                    mask = flag_anomalies(y_raw)
+                    if mask.any():
+                        fig.add_trace(go.Scatter(
+                            x=df.loc[mask, TIMESTAMP_COL],
+                            y=y_raw[mask],
+                            mode="markers",
+                            name="⚠ O₂ spike",
+                            marker=dict(
+                                color="#f0883e", size=8, symbol="x-thin",
+                                line=dict(width=2, color="#f0883e"),
+                            ),
+                            hovertemplate="<b>⚠ spike</b>: %{y:.2f}%<extra></extra>",
+                            showlegend=("spike" not in legend_shown),
+                        ), row=row, col=1)
+                        legend_shown.add("spike")
 
             fig.update_yaxes(
                 row=row, col=1,
@@ -432,7 +537,7 @@ with tab1:
 
         # Subplot title styling
         for annotation in fig.layout.annotations:
-            annotation.font.size = 11
+            annotation.font.size  = 11
             annotation.font.color = "#8b949e"
 
         chart_height = max(300, 220 * n_rows)
@@ -445,15 +550,25 @@ with tab1:
 
         st.plotly_chart(fig, use_container_width=True)
 
+        # Probe count legend explanation
+        if PROBE_MEAN in selected_cols and any(c in df.columns for c in PROBE_COLS):
+            st.markdown(
+                '<span style="color:#484f58;font-size:0.74rem;font-family:IBM Plex Mono,monospace">'
+                'Probe Mean line color → '
+                '<span style="color:#3fb950">■ green = 3 probes</span> · '
+                '<span style="color:#d29922">■ yellow = 2 probes</span> · '
+                '<span style="color:#ff7b72">■ red = 1 probe</span>'
+                '</span>',
+                unsafe_allow_html=True,
+            )
+
         if rolling_window > 1 and len(df) > 1:
             interval_sec = df[TIMESTAMP_COL].diff().median().total_seconds()
             smoothed_min = rolling_window * interval_sec / 60
             st.markdown(
-                f'<span style="color:#484f58;font-size:0.74rem;'
-                f'font-family:IBM Plex Mono,monospace">'
+                f'<span style="color:#484f58;font-size:0.74rem;font-family:IBM Plex Mono,monospace">'
                 f'Rolling window = {rolling_window} rows ≈ {smoothed_min:.1f} min of smoothing '
-                f'at your ~{interval_sec:.0f}s log interval. '
-                f'Set to 1 to see raw data.</span>',
+                f'at your ~{interval_sec:.0f}s log interval. Set to 1 to see raw data.</span>',
                 unsafe_allow_html=True,
             )
 
@@ -470,9 +585,7 @@ with tab2:
         stat_cols = [c for c in selected_cols if c in df.columns]
         if stat_cols:
             stats = df[stat_cols].describe().T
-            stats.index = [
-                NUMERIC_COLS.get(c, {}).get("label", c) for c in stats.index
-            ]
+            stats.index = [NUMERIC_COLS.get(c, {}).get("label", c) for c in stats.index]
             st.dataframe(stats.style.format("{:.3f}"), use_container_width=True)
     st.dataframe(df.reset_index(drop=True), use_container_width=True, height=420)
 
