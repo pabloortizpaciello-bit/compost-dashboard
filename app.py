@@ -356,20 +356,20 @@ if uploaded:
     )
 
     st.caption(f"Loaded **{len(uploaded)} file(s)** · {len(df_raw):,} rows total")
-        fan_col = detect_fan_col(df_raw)
-        present_numeric = [c for c in NUMERIC_COLS if c in df_raw.columns]
+    fan_col = detect_fan_col(df_raw)
+    present_numeric = [c for c in NUMERIC_COLS if c in df_raw.columns]
 
-        t_min = df_raw[TIMESTAMP_COL].min()
-        t_max = df_raw[TIMESTAMP_COL].max()
-        total_hours = max((t_max - t_min).total_seconds() / 3600, 1)
+    t_min = df_raw[TIMESTAMP_COL].min()
+    t_max = df_raw[TIMESTAMP_COL].max()
+    total_hours = max((t_max - t_min).total_seconds() / 3600, 1)
 
-        st.markdown("---")
-        st.markdown("**⏱ Coarse Range**")
-        range_mode = st.radio(
-            "Range mode",
-            ["Last N hours", "Last N days", "Full range"],
-            label_visibility="collapsed",
-        )
+    st.markdown("---")
+    st.markdown("**⏱ Coarse Range**")
+    range_mode = st.radio(
+        "Range mode",
+        ["Last N hours", "Last N days", "Full range"],
+        label_visibility="collapsed",
+    )
         if range_mode == "Last N hours":
             n_h = st.slider("Hours", 1, min(int(total_hours), 720), min(24, int(total_hours)))
             coarse_start = t_max - timedelta(hours=n_h)
