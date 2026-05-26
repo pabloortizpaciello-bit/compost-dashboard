@@ -326,10 +326,36 @@ def plotly_base():
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("**📂 Upload**")
-    uploaded = st.file_uploader("CSV file", type=["csv"], label_visibility="collapsed")
+uploaded = st.file_uploader(
+    "CSV file(s)",
+    type=["csv"],
+    accept_multiple_files=True,   # ← allow multiple files
+    label_visibility="collapsed",
+)
 
-    if uploaded:
-        df_raw  = load_csv(uploaded)
+if uploaded:
+    # Load each file and combine into a single DataFrame
+    dfs = []
+    for f in uploaded:
+        try:
+            dfs.append(load_csv(f))
+        except Exception as e:
+            st.warning(f"Skipped **{f.name}** — could not parse ({e})")
+
+    if not dfs:
+        st.error("No valid CSV files loaded.")
+        st.stop()
+
+    df_raw = pd.concat(dfs, ignore_index=True)
+
+    # Sort by timestamp and drop duplicate rows (in case files overlap)
+    df_raw = (
+        df_raw.sort_values(TIMESTAMP_COL)
+              .drop_duplicates(subset=[TIMESTAMP_COL])
+              .reset_index(drop=True)
+    )
+
+    st.caption(f"Loaded **{len(uploaded)} file(s)** · {len(df_raw):,} rows total")
         fan_col = detect_fan_col(df_raw)
         present_numeric = [c for c in NUMERIC_COLS if c in df_raw.columns]
 
