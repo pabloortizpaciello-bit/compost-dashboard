@@ -80,14 +80,20 @@ NUMERIC_COLS = {
 DEFAULT_ON = {"O2_avg_%", "CO2_ppm", "Temp_C"}
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-def load_csv(file):
+def load_csv(file) -> pd.DataFrame:
     df = pd.read_csv(
         file,
-        on_bad_lines="skip",
-        engine="python",
+        sep=None,                 # auto-detect comma vs tab
+        engine="python",          # required for sep=None and tolerant parsing
+        comment="#",              # skip lines starting with # (header comment)
+        on_bad_lines="skip",      # skip malformed rows
         encoding="utf-8",
         encoding_errors="ignore",
+        skip_blank_lines=True,
     )
+    # Strip any whitespace from column names (Arduino sometimes adds trailing spaces)
+    df.columns = df.columns.str.strip()
+    return df
     df.columns = df.columns.str.strip()
     if TIMESTAMP_COL in df.columns:
         df[TIMESTAMP_COL] = pd.to_datetime(df[TIMESTAMP_COL], errors="coerce")
