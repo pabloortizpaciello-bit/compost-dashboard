@@ -83,10 +83,10 @@ DEFAULT_ON = {"O2_avg_%", "CO2_ppm", "Temp_C"}
 def load_csv(file) -> pd.DataFrame:
     df = pd.read_csv(
         file,
-        sep=None,
-        engine="python",
-        comment="#",
-        on_bad_lines="skip",
+        sep=None,                 # auto-detect comma vs tab
+        engine="python",          # required for sep=None and tolerant parsing
+        comment="#",              # skip lines starting with # (header comment)
+        on_bad_lines="skip",      # skip malformed rows
         encoding="utf-8",
         encoding_errors="ignore",
         skip_blank_lines=True,
@@ -100,21 +100,14 @@ def load_csv(file) -> pd.DataFrame:
             df[TIMESTAMP_COL],
             errors="coerce",   # bad rows become NaT instead of crashing
         )
-        # Drop any rows where the timestamp couldn't be parsed
-        df = df.dropna(subset=[TIMESTAMP_COL]).reset_index(drop=True)
-
-    return df
-    # Strip any whitespace from column names (Arduino sometimes adds trailing spaces)
-    df.columns = df.columns.str.strip()
-    return df
-    df.columns = df.columns.str.strip()
-    if TIMESTAMP_COL in df.columns:
-        df[TIMESTAMP_COL] = pd.to_datetime(df[TIMESTAMP_COL], errors="coerce")
         df = df.dropna(subset=[TIMESTAMP_COL])
         df = df.sort_values(TIMESTAMP_COL).reset_index(drop=True)
+
+    # Force numeric columns to numeric (so .min/.max/etc work)
     for col in list(NUMERIC_COLS.keys()) + PROBE_COLS:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
+
     return df
 
 
@@ -159,9 +152,6 @@ def add_legend_only_trace(fig, name, color, symbol="square", size=12):
     Add a legend-only marker by placing the trace on a non-existent
     (phantom) axis. This prevents the dummy trace from polluting the
     autorange of any real subplot's x or y axis.
-
-    Caller is responsible for ensuring the phantom axes have been
-    declared in the layout (see ensure_phantom_axes).
     """
     fig.add_trace(go.Scatter(
         x=[None], y=[None],
@@ -178,8 +168,6 @@ def add_legend_only_trace(fig, name, color, symbol="square", size=12):
 def ensure_phantom_axes(fig):
     """
     Declare invisible phantom axes used by legend-only traces.
-    `domain=[0, 0.001]` clamps them to a 0.1% sliver in the corner as
-    belt-and-suspenders insurance against any accidental rendering.
     """
     fig.update_layout(**{
         f"xaxis{PHANTOM_AXIS}": dict(
@@ -215,10 +203,10 @@ def add_probe_mean_traces(fig, df, row, rolling_window, show_raw_under, legend_s
         ), row=row, col=1)
 
     # Split into contiguous segments by probe count
-    segments = []
     if len(df) == 0:
         return legend_shown
 
+    segments = []
     current_count = counts.iloc[0]
     seg_start = 0
 
@@ -326,50 +314,51 @@ def plotly_base():
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("**📂 Upload**")
-uploaded = st.file_uploader(
-    "CSV file(s)",
-    type=["csv"],
-    accept_multiple_files=True,   # ← allow multiple files
-    label_visibility="collapsed",
-)
-
-if uploaded:
-    # Load each file and combine into a single DataFrame
-    dfs = []
-    for f in uploaded:
-        try:
-            dfs.append(load_csv(f))
-        except Exception as e:
-            st.warning(f"Skipped **{f.name}** — could not parse ({e})")
-
-    if not dfs:
-        st.error("No valid CSV files loaded.")
-        st.stop()
-
-    df_raw = pd.concat(dfs, ignore_index=True)
-
-    # Sort by timestamp and drop duplicate rows (in case files overlap)
-    df_raw = (
-        df_raw.sort_values(TIMESTAMP_COL)
-              .drop_duplicates(subset=[TIMESTAMP_COL])
-              .reset_index(drop=True)
-    )
-
-    st.caption(f"Loaded **{len(uploaded)} file(s)** · {len(df_raw):,} rows total")
-    fan_col = detect_fan_col(df_raw)
-    present_numeric = [c for c in NUMERIC_COLS if c in df_raw.columns]
-
-    t_min = df_raw[TIMESTAMP_COL].min()
-    t_max = df_raw[TIMESTAMP_COL].max()
-    total_hours = max((t_max - t_min).total_seconds() / 3600, 1)
-
-    st.markdown("---")
-    st.markdown("**⏱ Coarse Range**")
-    range_mode = st.radio(
-        "Range mode",
-        ["Last N hours", "Last N days", "Full range"],
+    uploaded = st.file_uploader(
+        "CSV file(s)",
+        type=["csv"],
+        accept_multiple_files=True,
         label_visibility="collapsed",
     )
+
+    if uploaded:
+        # Load each file and combine into a single DataFrame
+        dfs = []
+        for f in uploaded:
+            try:
+                dfs.append(load_csv(f))
+            except Exception as e:
+                st.warning(f"Skipped **{f.name}** — could not parse ({e})")
+
+        if not dfs:
+            st.error("No valid CSV files loaded.")
+            st.stop()
+
+        df_raw = pd.concat(dfs, ignore_index=True)
+
+        # Sort by timestamp and drop duplicate rows (in case files overlap)
+        df_raw = (
+            df_raw.sort_values(TIMESTAMP_COL)
+                  .drop_duplicates(subset=[TIMESTAMP_COL])
+                  .reset_index(drop=True)
+        )
+
+        st.caption(f"Loaded **{len(uploaded)} file(s)** · {len(df_raw):,} rows total")
+
+        fan_col = detect_fan_col(df_raw)
+        present_numeric = [c for c in NUMERIC_COLS if c in df_raw.columns]
+
+        t_min = df_raw[TIMESTAMP_COL].min()
+        t_max = df_raw[TIMESTAMP_COL].max()
+        total_hours = max((t_max - t_min).total_seconds() / 3600, 1)
+
+        st.markdown("---")
+        st.markdown("**⏱ Coarse Range**")
+        range_mode = st.radio(
+            "Range mode",
+            ["Last N hours", "Last N days", "Full range"],
+            label_visibility="collapsed",
+        )
         if range_mode == "Last N hours":
             n_h = st.slider("Hours", 1, min(int(total_hours), 720), min(24, int(total_hours)))
             coarse_start = t_max - timedelta(hours=n_h)
@@ -558,9 +547,7 @@ with tab1:
             subplot_titles=subplot_titles,
         )
 
-        # Declare phantom axes BEFORE any legend-only traces are added,
-        # so that when the trace references xaxis=x99/yaxis=y99 those
-        # axes already exist as invisible, clamped placeholders.
+        # Declare phantom axes BEFORE any legend-only traces are added.
         ensure_phantom_axes(fig)
 
         # Fan shading + legend entry (legend uses phantom axes)
