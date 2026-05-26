@@ -83,14 +83,27 @@ DEFAULT_ON = {"O2_avg_%", "CO2_ppm", "Temp_C"}
 def load_csv(file) -> pd.DataFrame:
     df = pd.read_csv(
         file,
-        sep=None,                 # auto-detect comma vs tab
-        engine="python",          # required for sep=None and tolerant parsing
-        comment="#",              # skip lines starting with # (header comment)
-        on_bad_lines="skip",      # skip malformed rows
+        sep=None,
+        engine="python",
+        comment="#",
+        on_bad_lines="skip",
         encoding="utf-8",
         encoding_errors="ignore",
         skip_blank_lines=True,
     )
+    # Strip whitespace from column names
+    df.columns = df.columns.str.strip()
+
+    # Parse the timestamp column as datetime
+    if TIMESTAMP_COL in df.columns:
+        df[TIMESTAMP_COL] = pd.to_datetime(
+            df[TIMESTAMP_COL],
+            errors="coerce",   # bad rows become NaT instead of crashing
+        )
+        # Drop any rows where the timestamp couldn't be parsed
+        df = df.dropna(subset=[TIMESTAMP_COL]).reset_index(drop=True)
+
+    return df
     # Strip any whitespace from column names (Arduino sometimes adds trailing spaces)
     df.columns = df.columns.str.strip()
     return df
